@@ -2,7 +2,7 @@
   /*
    * External resources
    */
-  const DEFUDDLE_URL = "https://unpkg.com/defuddle@latest/dist/index.js";
+  const DEFUDDLE_URL = "https://mydefuddle.netlify.app/index.js";
   const SCRIPT_URL = "https://example.com/paginate-reader.js";
   const STORAGE_KEY = "paginateReaderStyleV12";
   const NEWSREADER_CSS =
@@ -32,7 +32,7 @@
   const THEMES = {
     light: {
       bg: "#ffffff",
-      fg: "#111111",
+      fg: "#000000",
       link: "#0645ad",
       panelBg: "#ffffff",
       chipBg: "#ffffff",
@@ -53,7 +53,7 @@
       themeColor: "#f4ecd8",
     },
     dark: {
-      bg: "#111111",
+      bg: "#000000",
       fg: "#f3f1eb",
       link: "#8ab4ff",
       panelBg: "#111111",
@@ -61,7 +61,7 @@
       controlBg: "#1c1c1c",
       controlFg: "#f3f1eb",
       shellBg: "#111111",
-      themeColor: "#111111",
+      themeColor: "#000000",
     },
   };
 
@@ -556,10 +556,7 @@ html, body {
 #pg-content iframe,
 #pg-content table,
 #pg-content pre,
-#pg-content blockquote,
-#pg-content ul,
-#pg-content ol,
-#pg-content li {
+#pg-content blockquote, {
   break-inside: avoid;
   page-break-inside: avoid;
   -webkit-column-break-inside: avoid;
@@ -1234,7 +1231,7 @@ html, body {
       const absY = Math.abs(dy);
       const frameWidth = getFrameWidth();
       const frameRect = frame.getBoundingClientRect();
-      const swipeThreshold = Math.min(120, frameWidth * 0.18);
+      const swipeThreshold = Math.min(120, frameWidth * 0.1);
       const tapThreshold = 12;
       const startedOnInteractive = isInteractiveTarget(startTarget);
 
@@ -1271,11 +1268,11 @@ html, body {
         }
 
         const localX = t.clientX - frameRect.left;
-        if (localX < frameWidth * 0.26) {
+        if (localX < frameWidth * 0.4) {
           prev();
           return;
         }
-        if (localX > frameWidth * 0.74) {
+        if (localX > frameWidth * 0.6) {
           next();
         }
       }
