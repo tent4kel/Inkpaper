@@ -1,81 +1,139 @@
 (async () => {
-  // External dependencies and storage/config keys.
-  const DEFUDDLE_URL = 'https://unpkg.com/defuddle@latest/dist/index.js';
-  const STORAGE_KEY = 'paginateBookmarkletStyleV8';
+  /*
+   * External resources
+   */
+  const DEFUDDLE_URL = "https://unpkg.com/defuddle@latest/dist/index.js";
+  const SCRIPT_URL = "https://example.com/paginate-reader.js";
+  const STORAGE_KEY = "paginateReaderStyleV12";
   const NEWSREADER_CSS =
-    'https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,200..800&display=swap';
+    "https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400..700&display=swap";
 
-  // Default reader settings. These are merged with any saved per-origin settings.
+  /*
+   * Default reader settings
+   */
   const DEFAULTS = {
+    frameMode: "centered",
     columnWidth: 21,
     fontSize: 21,
     lineHeight: 1.55,
     padding: 32,
     scrollerInset: 0,
-    fontFamily: 'original',
-    theme: 'light',
-    textAlign: 'left',
-    hyphenation: 'off',
-    suppressAnimations: 'on'
+    fontFamily: "original",
+    theme: "light",
+    textAlign: "left",
+    hyphenation: "off",
+    suppressAnimations: "on",
   };
 
-  // Prevent duplicate activation.
+  /*
+   * Theme palette model
+   * Everything visual should derive from these values.
+   */
+  const THEMES = {
+    light: {
+      bg: "#ffffff",
+      fg: "#111111",
+      link: "#0645ad",
+      panelBg: "#ffffff",
+      chipBg: "#ffffff",
+      controlBg: "#ffffff",
+      controlFg: "#111111",
+      shellBg: "#ffffff",
+      themeColor: "#ffffff",
+    },
+    sepia: {
+      bg: "#f4ecd8",
+      fg: "#3e2f1f",
+      link: "#7a4b17",
+      panelBg: "#f4ecd8",
+      chipBg: "#f4ecd8",
+      controlBg: "#f4ecd8",
+      controlFg: "#3e2f1f",
+      shellBg: "#f4ecd8",
+      themeColor: "#f4ecd8",
+    },
+    dark: {
+      bg: "#111111",
+      fg: "#f3f1eb",
+      link: "#8ab4ff",
+      panelBg: "#111111",
+      chipBg: "#111111",
+      controlBg: "#1c1c1c",
+      controlFg: "#f3f1eb",
+      shellBg: "#111111",
+      themeColor: "#111111",
+    },
+  };
+
+  /*
+   * Prevent running twice on the same page.
+   */
   if (window.__PAGINATE_BOOKMARKLET_ACTIVE__) return;
   window.__PAGINATE_BOOKMARKLET_ACTIVE__ = true;
 
-  // Dynamically load a script into the current page.
+  /*
+   * Utility: dynamically load a script.
+   */
   const loadScript = (src) =>
     new Promise((resolve, reject) => {
-      const s = document.createElement('script');
+      const s = document.createElement("script");
       s.src = src;
       s.onload = resolve;
-      s.onerror = () => reject(new Error('Failed to load ' + src));
+      s.onerror = () => reject(new Error("Failed to load " + src));
       document.head.appendChild(s);
     });
 
-  // Wait for web fonts to finish loading before measuring layout.
+  /*
+   * Utility: wait until fonts are ready before measuring layout.
+   */
   const waitForFonts = async () => {
-    if (document.fonts && document.fonts.ready) {
+    if (document.fonts?.ready) {
       try {
         await document.fonts.ready;
-      } catch (_) {}
+      } catch {}
     }
   };
 
-  // Wait for all images inside a root node to load before measuring layout.
+  /*
+   * Utility: wait until images are ready before measuring layout.
+   */
   const waitForImages = async (root) => {
-    const imgs = [...root.querySelectorAll('img')];
+    const imgs = [...root.querySelectorAll("img")];
     await Promise.all(
       imgs.map((img) =>
         img.complete
           ? Promise.resolve()
-          : new Promise((res) => {
-              img.addEventListener('load', res, { once: true });
-              img.addEventListener('error', res, { once: true });
+          : new Promise((resolve) => {
+              img.addEventListener("load", resolve, { once: true });
+              img.addEventListener("error", resolve, { once: true });
             })
       )
     );
   };
 
-  // Minimal HTML escaping for injected text fields.
+  /*
+   * Utility: escape text before injecting into HTML strings.
+   */
   const escapeHtml = (s) =>
     String(s)
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&#39;');
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
 
-  // Convert relative URLs in extracted content into absolute ones.
+  /*
+   * Utility: absolutize links/src attributes in extracted content.
+   */
   const normalizeRelativeUrls = (doc, baseUrl) => {
     const attrs = [
-      ['a', 'href'],
-      ['img', 'src'],
-      ['source', 'src'],
-      ['video', 'src'],
-      ['audio', 'src'],
-      ['iframe', 'src'],
-      ['link', 'href']
+      ["a", "href"],
+      ["img", "src"],
+      ["source", "src"],
+      ["video", "src"],
+      ["audio", "src"],
+      ["iframe", "src"],
+      ["link", "href"],
     ];
 
     for (const [selector, attr] of attrs) {
@@ -85,306 +143,732 @@
 
         if (
           /^(https?:)?\/\//i.test(value) ||
-          value.startsWith('data:') ||
-          value.startsWith('blob:') ||
-          value.startsWith('mailto:') ||
-          value.startsWith('tel:')
+          value.startsWith("data:") ||
+          value.startsWith("blob:") ||
+          value.startsWith("mailto:") ||
+          value.startsWith("tel:")
         ) {
           return;
         }
 
         try {
           el.setAttribute(attr, new URL(value, baseUrl).href);
-        } catch (_) {}
+        } catch {}
       });
     }
   };
 
-  // Load saved style settings from localStorage, if available.
+  /*
+   * Persistence helpers
+   */
   const loadSavedSettings = () => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return null;
-      const v = JSON.parse(raw);
-      if (!v || typeof v !== 'object') return null;
-      return v;
-    } catch (_) {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : null;
+    } catch {
       return null;
     }
   };
 
-  // Persist current style settings to localStorage.
-  const saveSettings = (v) => {
+  const saveSettings = (settings) => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(v));
-    } catch (_) {}
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    } catch {}
   };
 
-  // Lazily load the Newsreader font only if selected.
+  /*
+   * Lazily load Newsreader only when selected.
+   */
   const ensureNewsreader = () => {
-    if (document.getElementById('pg-newsreader-font')) return;
-    const l = document.createElement('link');
-    l.id = 'pg-newsreader-font';
-    l.rel = 'stylesheet';
-    l.href = NEWSREADER_CSS;
-    document.head.appendChild(l);
+    if (document.getElementById("pg-newsreader-font")) return;
+
+    const link = document.createElement("link");
+    link.id = "pg-newsreader-font";
+    link.rel = "stylesheet";
+    link.href = NEWSREADER_CSS;
+    document.head.appendChild(link);
   };
 
-  // Merge defaults and saved settings.
-  const mergeSettings = (base, extra) => Object.assign({}, base, extra || {});
+  /*
+   * Small helpers
+   */
+  const mergeSettings = (base, extra) => ({ ...base, ...(extra || {}) });
 
-  // Used to avoid hijacking taps/clicks on links and form controls.
   const isInteractiveTarget = (el) =>
-    !!(
-      el &&
-      el.closest &&
-      el.closest(
-        'a[href],button,input,select,textarea,label,summary,[role="button"],audio,video'
-      )
+    !!el?.closest?.(
+      'a[href],button,input,select,textarea,label,summary,[role="button"],audio,video'
     );
 
-  // Format article date metadata into a human-readable form when possible.
   const formatDate = (value) => {
-    if (!value) return '';
+    if (!value) return "";
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return String(value);
 
     try {
       return d.toLocaleDateString(undefined, {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
+        year: "numeric",
+        month: "long",
+        day: "numeric",
       });
-    } catch (_) {
+    } catch {
       return d.toISOString().slice(0, 10);
     }
   };
 
+  /*
+   * Export helper: generate a bookmarklet that reloads this script with settings.
+   */
+  const makeBookmarkletUrl = (settings) => {
+    const encoded = encodeURIComponent(JSON.stringify(settings));
+    return `javascript:(()=>{var s=document.createElement('script');s.src='${SCRIPT_URL}?settings=${encoded}';document.head.appendChild(s)})()`;
+  };
+
+  const copyText = async (text) => {
+    if (!navigator.clipboard?.writeText) return false;
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   try {
-    // Load Defuddle only when needed.
-    if (!window.Defuddle) await loadScript(DEFUDDLE_URL);
+    /*
+     * 1. Load Defuddle if not present
+     */
+    if (!window.Defuddle) {
+      await loadScript(DEFUDDLE_URL);
+    }
 
-    // Snapshot the current document HTML before replacing the page.
+    /*
+     * 2. Snapshot the page and capture original colors/fonts
+     */
     const html = document.documentElement.outerHTML;
-
-    // Capture original body typography/colors for "original" theme/font mode.
     const originalComputed = window.getComputedStyle(
       document.body || document.documentElement
     );
-    const originalFontFamily =
-      (originalComputed && originalComputed.fontFamily) || 'serif';
-    const originalBodyBg =
-      (originalComputed && originalComputed.backgroundColor) || '#ffffff';
-    const originalBodyColor =
-      (originalComputed && originalComputed.color) || '#111111';
+    const originalFontFamily = originalComputed.fontFamily || "serif";
+    const originalBodyBg = originalComputed.backgroundColor || "#ffffff";
+    const originalBodyColor = originalComputed.color || "#111111";
 
-    // Parse a detached copy of the page for extraction.
+    /*
+     * 3. Parse a detached copy and normalize URLs
+     */
     const parser = new DOMParser();
-    const sourceDoc = parser.parseFromString(html, 'text/html');
+    const sourceDoc = parser.parseFromString(html, "text/html");
     normalizeRelativeUrls(sourceDoc, location.href);
 
-    // Run Defuddle. Support both constructor-style and parse-style exports.
+    /*
+     * 4. Extract main article via Defuddle
+     */
     let article = null;
-    const D = window.Defuddle || window.defuddle || window.default;
+    const DefuddleExport = window.Defuddle || window.defuddle || window.default;
 
-    if (typeof D === 'function') {
+    if (typeof DefuddleExport === "function") {
       try {
-        const instance = new D(sourceDoc);
-        article = typeof instance.parse === 'function' ? await instance.parse() : null;
-      } catch (_) {
+        const instance = new DefuddleExport(sourceDoc);
+        article =
+          typeof instance.parse === "function" ? await instance.parse() : null;
+      } catch {
         article = null;
       }
     }
 
-    if (!article && D && typeof D.parse === 'function') {
+    if (!article && typeof DefuddleExport?.parse === "function") {
       try {
-        article = await D.parse(sourceDoc, { url: location.href });
-      } catch (_) {}
+        article = await DefuddleExport.parse(sourceDoc, { url: location.href });
+      } catch {}
     }
 
-    // Fall back to raw body HTML if extraction fails.
-    const articleHtml = (article && article.content) || sourceDoc.body.innerHTML || '';
-    const articleTitle = (article && article.title) || document.title || '';
-    const articleAuthor = (article && (article.author || article.byline || '')) || '';
-    const articlePublished = (article && (article.published || article.date || '')) || '';
-    const articleDescription = (article && article.description) || '';
+    /*
+     * 5. Fall back to raw body HTML if extraction is incomplete
+     */
+    const articleHtml = article?.content || sourceDoc.body.innerHTML || "";
+    const articleTitle = article?.title || document.title || "";
+    const articleAuthor = article?.author || article?.byline || "";
+    const articlePublished = article?.published || article?.date || "";
+    const articleDescription = article?.description || "";
 
-    // Build a richer article header from Defuddle metadata when present.
-    const headerBits = [];
+    /*
+     * 6. Build rich article header
+     */
+    const metaBits = [];
     if (articleAuthor) {
-      headerBits.push(
+      metaBits.push(
         `<span class="pg-meta-author">${escapeHtml(articleAuthor)}</span>`
       );
     }
     if (articlePublished) {
-      headerBits.push(
-        `<time class="pg-meta-date">${escapeHtml(formatDate(articlePublished))}</time>`
+      metaBits.push(
+        `<time class="pg-meta-date">${escapeHtml(
+          formatDate(articlePublished)
+        )}</time>`
       );
     }
 
-    const articleHeaderHtml =
-      `<header id="pg-article-header">` +
-      `${
-        articleTitle ? `<h1 id="pg-title">${escapeHtml(articleTitle)}</h1>` : ''
-      }` +
-      `${
-        headerBits.length
-          ? `<div id="pg-meta">${headerBits.join(
-              '<span class="pg-meta-sep"> • </span>'
-            )}</div>`
-          : ''
-      }` +
-      `${
-        articleDescription
-          ? `<p id="pg-description">${escapeHtml(articleDescription)}</p>`
-          : ''
-      }` +
-      `</header>`;
+    const articleHeaderHtml = `
+      <header id="pg-article-header">
+        ${articleTitle ? `<h1 id="pg-title">${escapeHtml(articleTitle)}</h1>` : ""}
+        ${
+          metaBits.length
+            ? `<div id="pg-meta">${metaBits.join(
+                '<span class="pg-meta-sep"> • </span>'
+              )}</div>`
+            : ""
+        }
+        ${
+          articleDescription
+            ? `<p id="pg-description">${escapeHtml(articleDescription)}</p>`
+            : ""
+        }
+      </header>
+    `;
 
-    // Preserve the original HTML so Esc/Exit can restore the page.
+    /*
+     * 7. Preserve original page so Exit/Escape can restore it
+     */
     const originalHtml = document.documentElement.innerHTML;
 
-    // Replace the current document with the reader UI.
-    document.documentElement.innerHTML = '';
+    /*
+     * 8. Clear page and replace with reader app
+     */
+    document.documentElement.innerHTML = "";
 
-    // Global reader styles.
-    const style = document.createElement('style');
+    /*
+     * 9. CSS for the whole reader
+     */
+    const style = document.createElement("style");
     style.textContent = `
-html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:var(--pg-bg);color:var(--pg-fg);font-family:var(--pg-font-family)}
-#pg-root,#pg-viewport{width:100%;height:100%}
-#pg-root{position:fixed;inset:0;z-index:2147483647;--pg-column-width:21em;--pg-font-size:21px;--pg-line-height:1.55;--pg-pad-x:32px;--pg-pad-y:24px;--pg-scroller-inset:0px;--pg-font-family:serif;--pg-bg:#ffffff;--pg-fg:#111111;--pg-link:#0645ad;--pg-panel-bg:rgba(255,255,255,.96);--pg-chip-bg:rgba(255,255,255,.88);--pg-text-align:left;--pg-hyphens:manual;background:var(--pg-bg);color:var(--pg-fg);font-family:var(--pg-font-family)}
-#pg-root,*{box-sizing:border-box}
-#pg-viewport{overflow-x:auto;overflow-y:hidden;scroll-behavior:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;position:relative;touch-action:pan-y pinch-zoom}
-#pg-viewport::-webkit-scrollbar{display:none}
-#pg-track{height:100%;position:relative;width:100%}
-#pg-scroller{height:100%;padding-top:var(--pg-scroller-inset);padding-bottom:var(--pg-scroller-inset);column-width:var(--pg-column-width);column-gap:0;column-fill:auto;overflow:visible}
-#pg-content{min-height:100%;padding-left:var(--pg-pad-x);padding-right:var(--pg-pad-x);padding-top:calc(var(--pg-pad-y) + env(safe-area-inset-top,0px) + 10px);padding-bottom:calc(var(--pg-pad-y) + env(safe-area-inset-bottom,0px) + 22px);margin:0;font-size:var(--pg-font-size);line-height:var(--pg-line-height);font-family:var(--pg-font-family);color:var(--pg-fg);text-align:var(--pg-text-align);hyphens:var(--pg-hyphens);-webkit-hyphens:var(--pg-hyphens);overflow-wrap:break-word}
-#pg-article-header{margin:0 0 1.25em 0;break-inside:avoid;page-break-inside:avoid;-webkit-column-break-inside:avoid}
-#pg-title{margin:0 0 .35em 0}
-#pg-meta{margin:0 0 .7em 0;font-size:.78em;line-height:1.35;font-style:italic;opacity:.8;text-align:center}
-#pg-description{margin:.2em auto 0 auto;max-width:32em;font-size:.9em;line-height:1.45;text-align:center;opacity:.92}
-.pg-meta-sep{opacity:.55}
-#pg-content h1,#pg-content h2,#pg-content h3,#pg-content h4,#pg-content h5,#pg-content h6{text-align:center!important;line-height:1.1!important;hyphens:none!important;-webkit-hyphens:none!important}
-#pg-content p,#pg-content li,#pg-content blockquote{hyphens:var(--pg-hyphens);-webkit-hyphens:var(--pg-hyphens);text-align:var(--pg-text-align)}
-#pg-content,#pg-content p,#pg-content li,#pg-content blockquote,#pg-content figcaption,#pg-content td,#pg-content th,#pg-content pre,#pg-content code,#pg-content h1,#pg-content h2,#pg-content h3,#pg-content h4,#pg-content h5,#pg-content h6{color:var(--pg-fg)}
-#pg-content a{color:var(--pg-link)}
-#pg-content figure,#pg-content picture,#pg-content svg,#pg-content canvas,#pg-content video,#pg-content iframe{break-inside:avoid;page-break-inside:avoid;-webkit-column-break-inside:avoid;max-width:100%;height:auto}
-#pg-content img{display:block;break-inside:avoid;page-break-inside:avoid;-webkit-column-break-inside:avoid;width:100%;max-width:100%;height:auto;max-height:80vh;object-fit:contain}
-#pg-content figure img,#pg-content p img:only-child,#pg-content a img:only-child{width:100%;max-width:100%;height:auto;max-height:80vh;object-fit:contain}
-#pg-content figure{margin:1em 0;max-width:100%}
-#pg-content figcaption,#pg-content .caption,#pg-content .figcaption,#pg-content .image-caption,#pg-content .photo-caption,#pg-content .media-caption,#pg-content .wp-caption-text,#pg-content .credit,#pg-content .credits,#pg-content .byline,#pg-content .photo-credit,#pg-content .image-credit,#pg-content [class*="caption"],#pg-content [class*="credit"]{font-size:.7em!important;line-height:1.35!important;font-style:italic!important;opacity:.88;margin-top:.45em}
-#pg-content table,#pg-content pre,#pg-content blockquote,#pg-content ul,#pg-content ol,#pg-content li{break-inside:avoid;page-break-inside:avoid;-webkit-column-break-inside:avoid}
-#pg-content h1,#pg-content h2,#pg-content h3,#pg-content h4,#pg-content h5,#pg-content h6{break-inside:avoid;page-break-inside:avoid;-webkit-column-break-inside:avoid}
-#pg-content table{width:100%;border-collapse:collapse;display:block;overflow-x:auto}
-#pg-content pre{white-space:pre-wrap;overflow-wrap:anywhere;hyphens:none;-webkit-hyphens:none;text-align:left}
-#pg-content code{overflow-wrap:anywhere;hyphens:none;-webkit-hyphens:none}
-#pg-content p{orphans:2;widows:2}
-#pg-tools-btn,#pg-page-info{position:fixed;bottom:calc(env(safe-area-inset-bottom,0px) + 5px);z-index:2147483647;background:var(--pg-chip-bg);backdrop-filter:blur(6px);color:var(--pg-fg);border:1px solid rgba(0,0,0,.14);border-radius:999px}
-#pg-tools-btn{left:10px;appearance:none;padding:7px 9px;font:14px/1 system-ui,sans-serif;cursor:pointer;opacity:.78}
-#pg-tools-btn:hover{opacity:1}
-#pg-page-info{right:10px;padding:6px 10px;font:11px/1.1 system-ui,sans-serif;opacity:.82;pointer-events:none}
-#pg-panel{position:fixed;left:10px;bottom:calc(env(safe-area-inset-bottom,0px) + 36px);z-index:2147483647;width:min(320px,calc(100vw - 20px));background:var(--pg-panel-bg);backdrop-filter:blur(10px);border:1px solid rgba(0,0,0,.12);border-radius:14px;padding:10px;box-shadow:0 8px 24px rgba(0,0,0,.10);font:12px/1.3 system-ui,sans-serif;color:var(--pg-fg);max-height:min(80vh,560px);overflow:auto}
-#pg-panel[hidden]{display:none}
-#pg-panel .pg-row{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;margin:0 0 8px 0}
-#pg-panel .pg-row:last-child{margin-bottom:0}
-#pg-panel input[type=range],#pg-panel select{width:150px}
-#pg-panel select{padding:2px 4px;border:1px solid rgba(0,0,0,.14);border-radius:8px;background:#fff;color:#111}
-#pg-panel .pg-actions{display:flex;gap:6px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap}
-#pg-panel button{appearance:none;border:1px solid rgba(0,0,0,.14);background:#fff;color:#111;border-radius:999px;padding:5px 8px;font:inherit;cursor:pointer}
-.pg-no-anim,.pg-no-anim *, .pg-no-anim *::before, .pg-no-anim *::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--pg-shell-bg);
+  color: var(--pg-fg);
+  font-family: var(--pg-font-family);
+}
+
+#pg-root, #pg-shell {
+  width: 100%;
+  height: 100%;
+}
+
+#pg-root {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+
+  --pg-column-width: 21em;
+  --pg-font-size: 21px;
+  --pg-line-height: 1.55;
+  --pg-pad-x: 32px;
+  --pg-pad-y: 24px;
+  --pg-scroller-inset: 0px;
+
+  --pg-font-family: serif;
+  --pg-text-align: left;
+  --pg-hyphens: manual;
+
+  --pg-bg: #ffffff;
+  --pg-fg: #111111;
+  --pg-link: #0645ad;
+
+  --pg-shell-bg: #ffffff;
+  --pg-panel-bg: #ffffff;
+  --pg-chip-bg: #ffffff;
+  --pg-control-bg: #ffffff;
+  --pg-control-fg: #111111;
+
+  --pg-frame-radius: 0px;
+  --pg-frame-shadow: none;
+  --pg-frame-border: 0;
+  --pg-frame-width: 100vw;
+
+  background: var(--pg-shell-bg);
+  color: var(--pg-fg);
+  font-family: var(--pg-font-family);
+}
+
+#pg-root * {
+  box-sizing: border-box;
+}
+
+#pg-shell {
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--pg-shell-bg);
+}
+
+#pg-frame {
+  position: relative;
+  width: var(--pg-frame-width);
+  height: 100%;
+  background: var(--pg-bg);
+  border-radius: var(--pg-frame-radius);
+  box-shadow: var(--pg-frame-shadow);
+  border: var(--pg-frame-border);
+  overflow: hidden;
+}
+
+#pg-viewport {
+  width: 100%;
+  height: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-behavior: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  position: relative;
+  touch-action: pan-y pinch-zoom;
+}
+
+#pg-viewport::-webkit-scrollbar {
+  display: none;
+}
+
+#pg-track {
+  height: 100%;
+  position: relative;
+  width: 100%;
+}
+
+#pg-scroller {
+  height: 100%;
+  padding-top: var(--pg-scroller-inset);
+  padding-bottom: var(--pg-scroller-inset);
+  column-width: var(--pg-column-width);
+  column-gap: 0;
+  column-fill: auto;
+  overflow: visible;
+}
+
+#pg-content {
+  min-height: 100%;
+  margin: 0;
+  padding-left: var(--pg-pad-x);
+  padding-right: var(--pg-pad-x);
+  padding-top: calc(var(--pg-pad-y) + env(safe-area-inset-top, 0px) + 10px);
+  padding-bottom: calc(var(--pg-pad-y) + env(safe-area-inset-bottom, 0px) + 22px);
+
+  font-size: var(--pg-font-size);
+  line-height: var(--pg-line-height);
+  font-family: var(--pg-font-family);
+  font-weight: 450;
+  text-align: var(--pg-text-align);
+  hyphens: var(--pg-hyphens);
+  -webkit-hyphens: var(--pg-hyphens);
+  overflow-wrap: break-word;
+
+  color: var(--pg-fg);
+  background: var(--pg-bg);
+}
+
+#pg-article-header {
+  margin: 0 0 1.25em 0;
+  break-inside: avoid;
+  page-break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+}
+
+#pg-title {
+  margin: 0 0 .35em 0;
+}
+
+#pg-meta {
+  margin: 0 0 .7em 0;
+  font-size: .78em;
+  line-height: 1.35;
+  font-style: italic;
+  opacity: .8;
+  text-align: center;
+}
+
+#pg-description {
+  margin: .2em auto 0 auto;
+  max-width: 32em;
+  font-size: .9em;
+  line-height: 1.45;
+  text-align: center;
+  opacity: .92;
+}
+
+.pg-meta-sep {
+  opacity: .55;
+}
+
+#pg-content,
+#pg-content p,
+#pg-content li,
+#pg-content blockquote,
+#pg-content figcaption,
+#pg-content td,
+#pg-content th,
+#pg-content pre,
+#pg-content code,
+#pg-content h1,
+#pg-content h2,
+#pg-content h3,
+#pg-content h4,
+#pg-content h5,
+#pg-content h6 {
+  color: var(--pg-fg);
+}
+
+#pg-content h1,
+#pg-content h2,
+#pg-content h3,
+#pg-content h4,
+#pg-content h5,
+#pg-content h6 {
+  text-align: center !important;
+  line-height: 1.1 !important;
+  hyphens: none !important;
+  -webkit-hyphens: none !important;
+  break-inside: avoid;
+  page-break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+}
+
+#pg-content p,
+#pg-content li,
+#pg-content blockquote {
+  hyphens: var(--pg-hyphens);
+  -webkit-hyphens: var(--pg-hyphens);
+  text-align: var(--pg-text-align);
+}
+
+#pg-content a {
+  color: var(--pg-link);
+}
+
+#pg-content figure,
+#pg-content picture,
+#pg-content svg,
+#pg-content canvas,
+#pg-content video,
+#pg-content iframe,
+#pg-content table,
+#pg-content pre,
+#pg-content blockquote,
+#pg-content ul,
+#pg-content ol,
+#pg-content li {
+  break-inside: avoid;
+  page-break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+}
+
+#pg-content img {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  max-height: 80vh;
+  object-fit: contain;
+  break-inside: avoid;
+  page-break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+}
+
+#pg-content figure img,
+#pg-content p img:only-child,
+#pg-content a img:only-child {
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  max-height: 80vh;
+  object-fit: contain;
+}
+
+#pg-content figure {
+  margin: 1em 0;
+  max-width: 100%;
+}
+
+#pg-content figcaption,
+#pg-content .caption,
+#pg-content .figcaption,
+#pg-content .image-caption,
+#pg-content .photo-caption,
+#pg-content .media-caption,
+#pg-content .wp-caption-text,
+#pg-content .credit,
+#pg-content .credits,
+#pg-content .byline,
+#pg-content .photo-credit,
+#pg-content .image-credit,
+#pg-content [class*="caption"],
+#pg-content [class*="credit"] {
+  margin-top: .45em;
+  font-size: .7em !important;
+  line-height: 1.35 !important;
+  font-style: italic !important;
+  opacity: .88;
+}
+
+#pg-content table {
+  width: 100%;
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+}
+
+#pg-content pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  hyphens: none;
+  -webkit-hyphens: none;
+  text-align: left;
+}
+
+#pg-content code {
+  overflow-wrap: anywhere;
+  hyphens: none;
+  -webkit-hyphens: none;
+}
+
+#pg-content p {
+  orphans: 2;
+  widows: 2;
+}
+
+#pg-tools-btn,
+#pg-page-info {
+  position: fixed;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 5px);
+  z-index: 2147483647;
+  background: var(--pg-chip-bg);
+  color: var(--pg-fg);
+  border: 1px solid rgba(0, 0, 0, .14);
+  border-radius: 999px;
+  backdrop-filter: blur(6px);
+}
+
+#pg-tools-btn {
+  left: 10px;
+  appearance: none;
+  padding: 7px 9px;
+  font: 14px/1 system-ui, sans-serif;
+  cursor: pointer;
+  opacity: .78;
+}
+
+#pg-tools-btn:hover {
+  opacity: 1;
+}
+
+#pg-page-info {
+  right: 10px;
+  padding: 6px 10px;
+  font: 11px/1.1 system-ui, sans-serif;
+  opacity: .82;
+  pointer-events: none;
+}
+
+#pg-panel {
+  position: fixed;
+  left: 10px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 36px);
+  z-index: 2147483647;
+  width: min(360px, calc(100vw - 20px));
+  max-height: min(80vh, 680px);
+  overflow: auto;
+  padding: 10px;
+
+  background: var(--pg-panel-bg);
+  color: var(--pg-fg);
+  border: 1px solid rgba(0, 0, 0, .12);
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .10);
+  backdrop-filter: blur(10px);
+
+  font: 12px/1.3 system-ui, sans-serif;
+}
+
+#pg-panel[hidden] {
+  display: none;
+}
+
+#pg-panel .pg-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 8px 0;
+}
+
+#pg-panel .pg-row:last-child {
+  margin-bottom: 0;
+}
+
+#pg-panel input[type="range"],
+#pg-panel select {
+  width: 150px;
+}
+
+#pg-panel select,
+#pg-panel button {
+  background: var(--pg-control-bg);
+  color: var(--pg-control-fg);
+}
+
+#pg-panel select {
+  padding: 2px 4px;
+  border: 1px solid rgba(0, 0, 0, .14);
+  border-radius: 8px;
+}
+
+#pg-panel .pg-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+#pg-panel button {
+  appearance: none;
+  border: 1px solid rgba(0, 0, 0, .14);
+  border-radius: 999px;
+  padding: 5px 8px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.pg-no-anim,
+.pg-no-anim *,
+.pg-no-anim *::before,
+.pg-no-anim *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
 `;
-    document.head.innerHTML = '';
-    document.body.innerHTML = '';
+    document.head.innerHTML = "";
+    document.body.innerHTML = "";
     document.head.appendChild(style);
 
-    // Main reader structure: viewport -> track -> multicol scroller -> article content.
-    const root = document.createElement('div');
-    root.id = 'pg-root';
+    /*
+     * 10. Build reader DOM
+     */
+    const root = document.createElement("div");
+    root.id = "pg-root";
 
-    const viewport = document.createElement('div');
-    viewport.id = 'pg-viewport';
+    const shell = document.createElement("div");
+    shell.id = "pg-shell";
 
-    const track = document.createElement('div');
-    track.id = 'pg-track';
+    const frame = document.createElement("div");
+    frame.id = "pg-frame";
 
-    const scroller = document.createElement('div');
-    scroller.id = 'pg-scroller';
+    const viewport = document.createElement("div");
+    viewport.id = "pg-viewport";
 
-    const content = document.createElement('article');
-    content.id = 'pg-content';
-    content.lang = document.documentElement.lang || navigator.language || 'en';
+    const track = document.createElement("div");
+    track.id = "pg-track";
+
+    const scroller = document.createElement("div");
+    scroller.id = "pg-scroller";
+
+    const content = document.createElement("article");
+    content.id = "pg-content";
+    content.lang = document.documentElement.lang || navigator.language || "en";
     content.innerHTML = articleHeaderHtml + articleHtml;
 
-    // Minimal persistent controls: tools button and page indicator.
-    const toolsBtn = document.createElement('button');
-    toolsBtn.id = 'pg-tools-btn';
-    toolsBtn.type = 'button';
-    toolsBtn.textContent = '🔧';
+    const toolsBtn = document.createElement("button");
+    toolsBtn.id = "pg-tools-btn";
+    toolsBtn.type = "button";
+    toolsBtn.textContent = "🔧";
 
-    const pageInfo = document.createElement('div');
-    pageInfo.id = 'pg-page-info';
-    pageInfo.textContent = '1 / 1';
+    const pageInfo = document.createElement("div");
+    pageInfo.id = "pg-page-info";
+    pageInfo.textContent = "1 / 1";
 
-    // Settings panel UI.
-    const panel = document.createElement('div');
-    panel.id = 'pg-panel';
+    const panel = document.createElement("div");
+    panel.id = "pg-panel";
     panel.hidden = true;
     panel.innerHTML = `
-<div class="pg-row"><label for="pg-col-width">Column width</label><input id="pg-col-width" type="range" min="14" max="32" step="0.5"></div>
-<div class="pg-row"><label for="pg-font-size">Font size</label><input id="pg-font-size" type="range" min="14" max="34" step="1"></div>
-<div class="pg-row"><label for="pg-line-height">Line height</label><input id="pg-line-height" type="range" min="1.2" max="2" step="0.05"></div>
-<div class="pg-row"><label for="pg-padding">Page padding</label><input id="pg-padding" type="range" min="8" max="64" step="2"></div>
-<div class="pg-row"><label for="pg-scroller-inset">Top/bottom inset</label><input id="pg-scroller-inset" type="range" min="0" max="64" step="2"></div>
-<div class="pg-row"><label for="pg-font-family">Font</label><select id="pg-font-family"><option value="original">Original</option><option value="serif">System serif</option><option value="sans">System sans</option><option value="newsreader">Newsreader</option></select></div>
-<div class="pg-row"><label for="pg-theme">Theme</label><select id="pg-theme"><option value="original">Original</option><option value="light">Light</option><option value="sepia">Sepia</option><option value="dark">Dark</option></select></div>
-<div class="pg-row"><label for="pg-text-align">Text align</label><select id="pg-text-align"><option value="left">Left</option><option value="justify">Justify</option></select></div>
-<div class="pg-row"><label for="pg-hyphenation">Hyphenation</label><select id="pg-hyphenation"><option value="off">Off</option><option value="auto">Auto</option></select></div>
-<div class="pg-row"><label for="pg-suppress-animations">Suppress animations</label><select id="pg-suppress-animations"><option value="on">On</option><option value="off">Off</option></select></div>
-<div class="pg-actions"><button type="button" id="pg-reset">Reset</button><button type="button" id="pg-close">Close</button><button type="button" id="pg-exit">Exit</button></div>
-`;
+      <div class="pg-row"><label for="pg-frame-mode">Frame</label><select id="pg-frame-mode"><option value="full">Full width</option><option value="centered">Centered</option></select></div>
+      <div class="pg-row"><label for="pg-col-width">Column width</label><input id="pg-col-width" type="range" min="14" max="32" step="0.5"></div>
+      <div class="pg-row"><label for="pg-font-size">Font size</label><input id="pg-font-size" type="range" min="14" max="34" step="1"></div>
+      <div class="pg-row"><label for="pg-line-height">Line height</label><input id="pg-line-height" type="range" min="1.2" max="2" step="0.05"></div>
+      <div class="pg-row"><label for="pg-padding">Page padding</label><input id="pg-padding" type="range" min="8" max="64" step="2"></div>
+      <div class="pg-row"><label for="pg-scroller-inset">Top/bottom inset</label><input id="pg-scroller-inset" type="range" min="0" max="64" step="2"></div>
+      <div class="pg-row"><label for="pg-font-family">Font</label><select id="pg-font-family"><option value="original">Original</option><option value="serif">System serif</option><option value="sans">System sans</option><option value="newsreader">Newsreader</option></select></div>
+      <div class="pg-row"><label for="pg-theme">Theme</label><select id="pg-theme"><option value="original">Original</option><option value="light">Light</option><option value="sepia">Sepia</option><option value="dark">Dark</option></select></div>
+      <div class="pg-row"><label for="pg-text-align">Text align</label><select id="pg-text-align"><option value="left">Left</option><option value="justify">Justify</option></select></div>
+      <div class="pg-row"><label for="pg-hyphenation">Hyphenation</label><select id="pg-hyphenation"><option value="off">Off</option><option value="auto">Auto</option></select></div>
+      <div class="pg-row"><label for="pg-suppress-animations">Suppress animations</label><select id="pg-suppress-animations"><option value="on">On</option><option value="off">Off</option></select></div>
+      <div class="pg-actions">
+        <button type="button" id="pg-export">Export</button>
+        <button type="button" id="pg-reset">Reset</button>
+        <button type="button" id="pg-close">Close</button>
+        <button type="button" id="pg-exit">Exit</button>
+      </div>
+    `;
 
-    // Assemble reader DOM.
     scroller.appendChild(content);
     track.appendChild(scroller);
     viewport.appendChild(track);
-    root.appendChild(viewport);
+    frame.appendChild(viewport);
+    shell.appendChild(frame);
+    root.appendChild(shell);
     root.appendChild(toolsBtn);
     root.appendChild(pageInfo);
     root.appendChild(panel);
     document.body.appendChild(root);
 
-    // Wait until fonts and images are stable before measuring columns/pages.
+    /*
+     * 11. Wait for layout-sensitive assets
+     */
     await waitForFonts();
     await waitForImages(root);
 
-    // Runtime state.
+    /*
+     * 12. Mutable runtime state
+     */
     let currentIndex = 0;
     let startX = 0;
     let startY = 0;
     let dragging = false;
-    let moved = false;
     let horizontalGesture = false;
-    let interactiveGesture = false;
+    let verticalGesture = false;
+    let startTarget = null;
     let resizeObserver = null;
     let reflowTimer = 0;
+    let wheelLock = false;
+    let previousThemeMetaContent = null;
 
-    // Grab settings controls.
-    const colWidthInput = panel.querySelector('#pg-col-width');
-    const fontSizeInput = panel.querySelector('#pg-font-size');
-    const lineHeightInput = panel.querySelector('#pg-line-height');
-    const paddingInput = panel.querySelector('#pg-padding');
-    const scrollerInsetInput = panel.querySelector('#pg-scroller-inset');
-    const fontFamilySelect = panel.querySelector('#pg-font-family');
-    const themeSelect = panel.querySelector('#pg-theme');
-    const textAlignSelect = panel.querySelector('#pg-text-align');
-    const hyphenationSelect = panel.querySelector('#pg-hyphenation');
-    const suppressAnimationsSelect = panel.querySelector('#pg-suppress-animations');
-    const resetBtn = panel.querySelector('#pg-reset');
-    const closeBtn = panel.querySelector('#pg-close');
-    const exitBtn = panel.querySelector('#pg-exit');
+    /*
+     * 13. Panel controls
+     */
+    const frameModeSelect = panel.querySelector("#pg-frame-mode");
+    const colWidthInput = panel.querySelector("#pg-col-width");
+    const fontSizeInput = panel.querySelector("#pg-font-size");
+    const lineHeightInput = panel.querySelector("#pg-line-height");
+    const paddingInput = panel.querySelector("#pg-padding");
+    const scrollerInsetInput = panel.querySelector("#pg-scroller-inset");
+    const fontFamilySelect = panel.querySelector("#pg-font-family");
+    const themeSelect = panel.querySelector("#pg-theme");
+    const textAlignSelect = panel.querySelector("#pg-text-align");
+    const hyphenationSelect = panel.querySelector("#pg-hyphenation");
+    const suppressAnimationsSelect = panel.querySelector("#pg-suppress-animations");
+    const exportBtn = panel.querySelector("#pg-export");
+    const resetBtn = panel.querySelector("#pg-reset");
+    const closeBtn = panel.querySelector("#pg-close");
+    const exitBtn = panel.querySelector("#pg-exit");
 
-    // Initialize controls from defaults + persisted settings.
+    /*
+     * 14. Initialize settings
+     */
     const saved = mergeSettings(DEFAULTS, loadSavedSettings());
+    frameModeSelect.value = String(saved.frameMode);
     colWidthInput.value = String(saved.columnWidth);
     fontSizeInput.value = String(saved.fontSize);
     lineHeightInput.value = String(saved.lineHeight);
@@ -396,34 +880,37 @@ html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:v
     hyphenationSelect.value = String(saved.hyphenation);
     suppressAnimationsSelect.value = String(saved.suppressAnimations);
 
-    // Convenience predicate used for scroll/page-turn behavior.
-    const animationsOff = () => suppressAnimationsSelect.value === 'on';
+    /*
+     * 15. Layout and settings helpers
+     */
+    const animationsOff = () => suppressAnimationsSelect.value === "on";
 
-    // Use visualViewport when available to handle Safari/browser chrome correctly.
-    const getPageWidth = () =>
+    const getShellWidth = () =>
       Math.max(
         1,
         Math.round(
           (window.visualViewport && window.visualViewport.width) ||
-            viewport.clientWidth ||
             window.innerWidth ||
+            document.documentElement.clientWidth ||
             1
         )
       );
 
-    const getPageHeight = () =>
+    const getShellHeight = () =>
       Math.max(
         1,
         Math.round(
           (window.visualViewport && window.visualViewport.height) ||
-            viewport.clientHeight ||
             window.innerHeight ||
+            document.documentElement.clientHeight ||
             1
         )
       );
 
-    // Serialize current settings for persistence.
+    const getFrameWidth = () => frame.clientWidth || getShellWidth();
+
     const currentSettings = () => ({
+      frameMode: frameModeSelect.value,
       columnWidth: parseFloat(colWidthInput.value),
       fontSize: parseFloat(fontSizeInput.value),
       lineHeight: parseFloat(lineHeightInput.value),
@@ -433,151 +920,193 @@ html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:v
       theme: themeSelect.value,
       textAlign: textAlignSelect.value,
       hyphenation: hyphenationSelect.value,
-      suppressAnimations: suppressAnimationsSelect.value
+      suppressAnimations: suppressAnimationsSelect.value,
     });
 
-    // Apply the selected theme to CSS custom properties.
+    /*
+     * Theme resolution
+     */
+    const getThemePalette = (themeName) => {
+      if (themeName === "original") {
+        return {
+          bg: originalBodyBg,
+          fg: originalBodyColor,
+          link: "#0645ad",
+          panelBg: originalBodyBg,
+          chipBg: originalBodyBg,
+          controlBg: originalBodyBg,
+          controlFg: originalBodyColor,
+          shellBg: originalBodyBg,
+          themeColor: originalBodyBg,
+        };
+      }
+
+      return THEMES[themeName] || THEMES.light;
+    };
+
+    const applyBrowserThemeColor = (color) => {
+      let meta = document.querySelector('meta[name="theme-color"]');
+      if (!meta) {
+        meta = document.createElement("meta");
+        meta.name = "theme-color";
+        document.head.appendChild(meta);
+      }
+
+      if (previousThemeMetaContent === null) {
+        previousThemeMetaContent = meta.getAttribute("content");
+      }
+
+      meta.setAttribute("content", color);
+    };
+
+    const applyPalette = (palette) => {
+      root.style.setProperty("--pg-bg", palette.bg);
+      root.style.setProperty("--pg-fg", palette.fg);
+      root.style.setProperty("--pg-link", palette.link);
+      root.style.setProperty("--pg-shell-bg", palette.shellBg);
+      root.style.setProperty("--pg-panel-bg", palette.panelBg);
+      root.style.setProperty("--pg-chip-bg", palette.chipBg);
+      root.style.setProperty("--pg-control-bg", palette.controlBg);
+      root.style.setProperty("--pg-control-fg", palette.controlFg);
+      applyBrowserThemeColor(palette.themeColor || palette.bg);
+    };
+
     const applyTheme = () => {
-      const theme = themeSelect.value;
-
-      if (theme === 'dark') {
-        root.style.setProperty('--pg-bg', '#111111');
-        root.style.setProperty('--pg-fg', '#f3f1eb');
-        root.style.setProperty('--pg-link', '#8ab4ff');
-        root.style.setProperty('--pg-panel-bg', 'rgba(28,28,28,.96)');
-        root.style.setProperty('--pg-chip-bg', 'rgba(28,28,28,.88)');
-      } else if (theme === 'sepia') {
-        root.style.setProperty('--pg-bg', '#f4ecd8');
-        root.style.setProperty('--pg-fg', '#3e2f1f');
-        root.style.setProperty('--pg-link', '#7a4b17');
-        root.style.setProperty('--pg-panel-bg', 'rgba(244,236,216,.96)');
-        root.style.setProperty('--pg-chip-bg', 'rgba(244,236,216,.88)');
-      } else if (theme === 'original') {
-        root.style.setProperty('--pg-bg', originalBodyBg);
-        root.style.setProperty('--pg-fg', originalBodyColor);
-        root.style.setProperty('--pg-link', '#0645ad');
-        root.style.setProperty('--pg-panel-bg', 'rgba(255,255,255,.96)');
-        root.style.setProperty('--pg-chip-bg', 'rgba(255,255,255,.88)');
-      } else {
-        root.style.setProperty('--pg-bg', '#ffffff');
-        root.style.setProperty('--pg-fg', '#111111');
-        root.style.setProperty('--pg-link', '#0645ad');
-        root.style.setProperty('--pg-panel-bg', 'rgba(255,255,255,.96)');
-        root.style.setProperty('--pg-chip-bg', 'rgba(255,255,255,.88)');
-      }
+      applyPalette(getThemePalette(themeSelect.value));
     };
 
-    // Apply the selected font family to CSS custom properties.
+    /*
+     * Font resolution
+     */
     const applyFont = () => {
-      const v = fontFamilySelect.value;
-
-      if (v === 'original') {
-        root.style.setProperty('--pg-font-family', originalFontFamily);
-      } else if (v === 'sans') {
-        root.style.setProperty(
-          '--pg-font-family',
-          'system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif'
-        );
-      } else if (v === 'newsreader') {
-        ensureNewsreader();
-        root.style.setProperty(
-          '--pg-font-family',
-          '"Newsreader",Georgia,Cambria,"Times New Roman",Times,serif'
-        );
-      } else {
-        root.style.setProperty(
-          '--pg-font-family',
-          'ui-serif,Georgia,Cambria,"Times New Roman",Times,serif'
-        );
+      switch (fontFamilySelect.value) {
+        case "original":
+          root.style.setProperty("--pg-font-family", originalFontFamily);
+          break;
+        case "sans":
+          root.style.setProperty(
+            "--pg-font-family",
+            'system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif'
+          );
+          break;
+        case "newsreader":
+          ensureNewsreader();
+          root.style.setProperty(
+            "--pg-font-family",
+            '"Newsreader",Georgia,Cambria,"Times New Roman",Times,serif'
+          );
+          break;
+        default:
+          root.style.setProperty(
+            "--pg-font-family",
+            'ui-serif,Georgia,Cambria,"Times New Roman",Times,serif'
+          );
       }
     };
 
-    // Apply text alignment and hyphenation behavior.
     const applyTextFlow = () => {
       root.style.setProperty(
-        '--pg-text-align',
-        textAlignSelect.value === 'justify' ? 'justify' : 'left'
+        "--pg-text-align",
+        textAlignSelect.value === "justify" ? "justify" : "left"
       );
       root.style.setProperty(
-        '--pg-hyphens',
-        hyphenationSelect.value === 'auto' ? 'auto' : 'manual'
+        "--pg-hyphens",
+        hyphenationSelect.value === "auto" ? "auto" : "manual"
       );
     };
 
-    // Disable animations/transitions globally inside the reader when requested.
     const applyAnimationSetting = () => {
-      if (animationsOff()) root.classList.add('pg-no-anim');
-      else root.classList.remove('pg-no-anim');
+      root.classList.toggle("pg-no-anim", animationsOff());
     };
 
-    // Push current settings into CSS variables.
-    const applySettings = () => {
-      root.style.setProperty('--pg-column-width', colWidthInput.value + 'em');
-      root.style.setProperty('--pg-font-size', fontSizeInput.value + 'px');
-      root.style.setProperty('--pg-line-height', lineHeightInput.value);
-      root.style.setProperty('--pg-pad-x', paddingInput.value + 'px');
-      root.style.setProperty(
-        '--pg-pad-y',
-        Math.max(12, Math.round(paddingInput.value * 0.85)) + 'px'
-      );
-      root.style.setProperty('--pg-scroller-inset', scrollerInsetInput.value + 'px');
+    const applyFrameMode = () => {
+      /*
+       * Currently frame styling is intentionally invisible.
+       * Only width behavior changes between modes.
+       */
+      root.style.setProperty("--pg-frame-radius", "0px");
+      root.style.setProperty("--pg-frame-shadow", "none");
+      root.style.setProperty("--pg-frame-border", "0");
+    };
 
+    const applySettings = () => {
+      root.style.setProperty("--pg-column-width", colWidthInput.value + "em");
+      root.style.setProperty("--pg-font-size", fontSizeInput.value + "px");
+      root.style.setProperty("--pg-line-height", lineHeightInput.value);
+      root.style.setProperty("--pg-pad-x", paddingInput.value + "px");
+      root.style.setProperty(
+        "--pg-pad-y",
+        Math.max(12, Math.round(Number(paddingInput.value) * 0.85)) + "px"
+      );
+      root.style.setProperty("--pg-scroller-inset", scrollerInsetInput.value + "px");
+
+      applyFrameMode();
       applyFont();
       applyTheme();
       applyTextFlow();
       applyAnimationSetting();
     };
 
-    // Page count is based on padded horizontal track width divided by viewport width.
-    const getPageCount = () => Math.max(1, Math.ceil(track.scrollWidth / getPageWidth()));
+    /*
+     * 16. Pagination math
+     */
+    const getPageCount = () =>
+      Math.max(1, Math.ceil(track.scrollWidth / getFrameWidth()));
+
     const clamp = (n) => Math.max(0, Math.min(n, getPageCount() - 1));
 
-    // Update page indicator chip.
     const renderInfo = () => {
       pageInfo.textContent = `${currentIndex + 1} / ${getPageCount()}`;
     };
 
-    // Snap to the current page index.
     const sync = () => {
       viewport.scrollTo({
-        left: currentIndex * getPageWidth(),
+        left: currentIndex * getFrameWidth(),
         top: 0,
-        behavior: animationsOff() ? 'auto' : 'smooth'
+        behavior: animationsOff() ? "auto" : "smooth",
       });
       renderInfo();
     };
 
-    // Recalculate page/track dimensions and normalize the current page index.
     const updateLayout = () => {
-      const vw = getPageWidth();
-      const vh = getPageHeight();
+      const shellWidth = getShellWidth();
+      const shellHeight = getShellHeight();
 
-      root.style.width = vw + 'px';
-      root.style.height = vh + 'px';
-      viewport.style.width = vw + 'px';
-      viewport.style.height = vh + 'px';
-      track.style.height = vh + 'px';
-      scroller.style.width = vw + 'px';
-      scroller.style.height = vh + 'px';
-      track.style.width = vw + 'px';
+      root.style.width = shellWidth + "px";
+      root.style.height = shellHeight + "px";
+      shell.style.width = shellWidth + "px";
+      shell.style.height = shellHeight + "px";
 
-      // Compute content width created by multicol layout, then add tail padding
-      // so the last page turn is always a full viewport width.
+      let frameWidth = shellWidth;
+      if (frameModeSelect.value === "centered" && shellWidth > 900) {
+        frameWidth = Math.min(shellWidth - 48, 1200);
+      }
+
+      frame.style.width = frameWidth + "px";
+      frame.style.height = shellHeight + "px";
+      viewport.style.width = frameWidth + "px";
+      viewport.style.height = shellHeight + "px";
+      track.style.height = shellHeight + "px";
+      scroller.style.width = frameWidth + "px";
+      scroller.style.height = shellHeight + "px";
+      track.style.width = frameWidth + "px";
+
+      /*
+       * Pad the track so last page turn is always a full page width.
+       */
       const contentWidth = scroller.scrollWidth;
-      const pad = (vw - (contentWidth % vw)) % vw;
-      track.style.width = contentWidth + pad + 'px';
+      const pad = (frameWidth - (contentWidth % frameWidth)) % frameWidth;
+      track.style.width = contentWidth + pad + "px";
 
       currentIndex = clamp(currentIndex);
       sync();
     };
 
-    // Debounced relayout helper for resize/orientation churn.
     const scheduleRelayout = () => {
       clearTimeout(reflowTimer);
       reflowTimer = setTimeout(updateLayout, 40);
     };
 
-    // Explicit page navigation helpers.
     const goTo = (n) => {
       currentIndex = clamp(n);
       sync();
@@ -586,7 +1115,6 @@ html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:v
     const next = () => goTo(currentIndex + 1);
     const prev = () => goTo(currentIndex - 1);
 
-    // Called when the user changes settings in the panel.
     const relayoutFromControls = () => {
       applySettings();
       saveSettings(currentSettings());
@@ -594,132 +1122,225 @@ html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:v
     };
 
     const onResize = () => scheduleRelayout();
-    const onOrientationChange = () => scheduleRelayout();
 
-    // Keyboard navigation.
+    /*
+     * 17. Keyboard navigation
+     */
     const onKey = (e) => {
-      if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
+      if (e.key === "ArrowRight" || e.key === " " || e.key === "PageDown") {
         e.preventDefault();
         next();
-      } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        return;
+      }
+
+      if (e.key === "ArrowLeft" || e.key === "PageUp") {
         e.preventDefault();
         prev();
-      } else if (e.key === 'Home') {
+        return;
+      }
+
+      if (e.key === "Home") {
         e.preventDefault();
         goTo(0);
-      } else if (e.key === 'End') {
+        return;
+      }
+
+      if (e.key === "End") {
         e.preventDefault();
         goTo(getPageCount() - 1);
-      } else if (e.key === 'Escape') {
-        if (panel.hidden) {
-          e.preventDefault();
-          exit();
-        } else {
-          e.preventDefault();
-          panel.hidden = true;
-        }
+        return;
+      }
+
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (panel.hidden) exit();
+        else panel.hidden = true;
       }
     };
 
-    // Touch gesture start: record origin point and whether this began on a link/control.
+    /*
+     * 18. Wheel navigation
+     * Vertical or horizontal wheel movement flips pages.
+     */
+    const onWheel = (e) => {
+      if (!panel.hidden) return;
+      if (wheelLock) {
+        e.preventDefault();
+        return;
+      }
+
+      const absX = Math.abs(e.deltaX);
+      const absY = Math.abs(e.deltaY);
+      const dominant = absY >= absX ? e.deltaY : e.deltaX;
+
+      if (Math.abs(dominant) < 18) return;
+
+      e.preventDefault();
+      wheelLock = true;
+
+      if (dominant > 0) next();
+      else prev();
+
+      setTimeout(() => {
+        wheelLock = false;
+      }, animationsOff() ? 120 : 280);
+    };
+
+    /*
+     * 19. Touch navigation
+     * Important rule:
+     * - Swipes should work even if they start on links/images wrapped in links.
+     * - Tiny taps on links should still activate the link.
+     */
     const onTouchStart = (e) => {
-      if (panel.hidden === false) return;
+      if (!panel.hidden) return;
       if (e.touches.length !== 1) return;
 
       const t = e.touches[0];
       dragging = true;
-      moved = false;
       horizontalGesture = false;
-      interactiveGesture = isInteractiveTarget(e.target);
+      verticalGesture = false;
+      startTarget = e.target;
       startX = t.clientX;
       startY = t.clientY;
     };
 
-    // Touch gesture move: determine whether this is a horizontal page-turn gesture.
     const onTouchMove = (e) => {
-      if (!dragging || interactiveGesture) return;
+      if (!dragging) return;
 
       const t = e.touches[0];
       const dx = t.clientX - startX;
       const dy = t.clientY - startY;
 
-      if (Math.abs(dx) > 8 || Math.abs(dy) > 8) moved = true;
-
       if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 10) {
         horizontalGesture = true;
+        e.preventDefault();
+      } else if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 10) {
+        verticalGesture = true;
         e.preventDefault();
       }
     };
 
-    // Touch gesture end: swipe left/right to page, tap edges to page, preserve link taps.
     const onTouchEnd = (e) => {
       if (!dragging) return;
       dragging = false;
 
-      const t = e.changedTouches && e.changedTouches[0] ? e.changedTouches[0] : null;
+      const t = e.changedTouches?.[0];
       if (!t) return;
 
       const dx = t.clientX - startX;
       const dy = t.clientY - startY;
       const absX = Math.abs(dx);
       const absY = Math.abs(dy);
-      const vw = getPageWidth();
-      const threshold = Math.min(120, vw * 0.18);
+      const frameWidth = getFrameWidth();
+      const frameRect = frame.getBoundingClientRect();
+      const swipeThreshold = Math.min(120, frameWidth * 0.18);
+      const tapThreshold = 12;
+      const startedOnInteractive = isInteractiveTarget(startTarget);
 
-      if (interactiveGesture) return;
-
-      if (horizontalGesture && absX >= threshold && absX > absY) {
+      /*
+       * Horizontal swipe/flick
+       */
+      if (horizontalGesture && absX >= swipeThreshold && absX > absY) {
         if (dx < 0) next();
         else prev();
         return;
       }
 
-      // Edge-tap page turns. Middle taps are ignored.
-      if (absX < 12 && absY < 12) {
-        const tapX = t.clientX;
-        if (tapX < vw * 0.26) {
+      /*
+       * Vertical swipe/flick
+       * Up = next page, down = previous page
+       */
+      if (verticalGesture && absY >= swipeThreshold && absY > absX) {
+        if (dy < 0) next();
+        else prev();
+        return;
+      }
+
+      /*
+       * Edge taps only when it was a true tap and did not start on a link/control.
+       */
+      if (
+        absX < tapThreshold &&
+        absY < tapThreshold &&
+        t.clientX >= frameRect.left &&
+        t.clientX <= frameRect.right
+      ) {
+        if (startedOnInteractive) {
+          return;
+        }
+
+        const localX = t.clientX - frameRect.left;
+        if (localX < frameWidth * 0.26) {
           prev();
           return;
         }
-        if (tapX > vw * 0.74) {
+        if (localX > frameWidth * 0.74) {
           next();
-          return;
         }
       }
     };
 
-    // Restore the original page and remove all listeners.
+    /*
+     * 20. Export current settings as bookmarklet
+     */
+    const onExport = async () => {
+      const url = makeBookmarkletUrl(currentSettings());
+      const copied = await copyText(url);
+
+      if (copied) {
+        exportBtn.textContent = "Copied";
+        setTimeout(() => {
+          exportBtn.textContent = "Export";
+        }, 1200);
+      } else {
+        prompt("Copy this bookmarklet URL:", url);
+      }
+    };
+
+    /*
+     * 21. Exit and restore original page
+     */
     const exit = () => {
       clearTimeout(reflowTimer);
-      window.removeEventListener('resize', onResize);
-      window.removeEventListener('orientationchange', onOrientationChange);
 
-      if (window.visualViewport) {
-        window.visualViewport.removeEventListener('resize', onResize);
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("orientationchange", onResize);
+      window.visualViewport?.removeEventListener("resize", onResize);
+
+      document.removeEventListener("keydown", onKey, true);
+      viewport.removeEventListener("wheel", onWheel);
+      viewport.removeEventListener("touchstart", onTouchStart);
+      viewport.removeEventListener("touchmove", onTouchMove);
+      viewport.removeEventListener("touchend", onTouchEnd);
+
+      resizeObserver?.disconnect();
+
+      const themeMeta = document.querySelector('meta[name="theme-color"]');
+      if (themeMeta && previousThemeMetaContent !== null) {
+        themeMeta.setAttribute("content", previousThemeMetaContent);
       }
-
-      document.removeEventListener('keydown', onKey, true);
-      viewport.removeEventListener('touchstart', onTouchStart);
-      viewport.removeEventListener('touchmove', onTouchMove);
-      viewport.removeEventListener('touchend', onTouchEnd);
-
-      if (resizeObserver) resizeObserver.disconnect();
 
       document.documentElement.innerHTML = originalHtml;
       window.__PAGINATE_BOOKMARKLET_ACTIVE__ = false;
     };
 
-    // Basic panel controls.
+    /*
+     * 22. Wire UI controls
+     */
     toolsBtn.onclick = () => {
       panel.hidden = !panel.hidden;
     };
+
     closeBtn.onclick = () => {
       panel.hidden = true;
     };
-    exitBtn.onclick = exit;
 
-    // Reset panel controls back to defaults.
+    exitBtn.onclick = exit;
+    exportBtn.onclick = onExport;
+
     resetBtn.onclick = () => {
+      frameModeSelect.value = String(DEFAULTS.frameMode);
       colWidthInput.value = String(DEFAULTS.columnWidth);
       fontSizeInput.value = String(DEFAULTS.fontSize);
       lineHeightInput.value = String(DEFAULTS.lineHeight);
@@ -733,7 +1354,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:v
       relayoutFromControls();
     };
 
-    // Any settings change triggers save + relayout.
+    frameModeSelect.onchange = relayoutFromControls;
     colWidthInput.oninput = relayoutFromControls;
     fontSizeInput.oninput = relayoutFromControls;
     lineHeightInput.oninput = relayoutFromControls;
@@ -745,38 +1366,41 @@ html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:v
     hyphenationSelect.onchange = relayoutFromControls;
     suppressAnimationsSelect.onchange = relayoutFromControls;
 
-    // Initial render.
+    /*
+     * 23. Initial render
+     */
     applySettings();
     updateLayout();
 
-    // Resize/orientation/layout observers.
-    window.addEventListener('resize', onResize, { passive: true });
-    window.addEventListener('orientationchange', onOrientationChange, {
-      passive: true
+    /*
+     * 24. Observers and listeners
+     */
+    window.addEventListener("resize", onResize, { passive: true });
+    window.addEventListener("orientationchange", onResize, { passive: true });
+    window.visualViewport?.addEventListener("resize", onResize, {
+      passive: true,
     });
 
-    if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', onResize, {
-        passive: true
-      });
-    }
-
-    if ('ResizeObserver' in window) {
+    if ("ResizeObserver" in window) {
       resizeObserver = new ResizeObserver(() => scheduleRelayout());
       resizeObserver.observe(root);
+      resizeObserver.observe(shell);
+      resizeObserver.observe(frame);
       resizeObserver.observe(viewport);
     }
 
-    // Interaction listeners.
-    document.addEventListener('keydown', onKey, true);
-    viewport.addEventListener('touchstart', onTouchStart, { passive: true });
-    viewport.addEventListener('touchmove', onTouchMove, { passive: false });
-    viewport.addEventListener('touchend', onTouchEnd, { passive: true });
+    document.addEventListener("keydown", onKey, true);
+    viewport.addEventListener("wheel", onWheel, { passive: false });
+    viewport.addEventListener("touchstart", onTouchStart, { passive: true });
+    viewport.addEventListener("touchmove", onTouchMove, { passive: false });
+    viewport.addEventListener("touchend", onTouchEnd, { passive: true });
 
-    // Ensure page indicator is correct on first render.
+    /*
+     * 25. Final sync
+     */
     sync();
   } catch (err) {
     window.__PAGINATE_BOOKMARKLET_ACTIVE__ = false;
-    alert('Paginate failed: ' + (err && err.message ? err.message : err));
+    alert("Paginate failed: " + (err && err.message ? err.message : err));
   }
 })();
