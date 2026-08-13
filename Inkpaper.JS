@@ -1,9 +1,15 @@
 (async () => {
   /*
+   * Capture this synchronously, before any `await` — document.currentScript
+   * is only valid while the script is still executing synchronously.
+   */
+  const CURRENT_SCRIPT_SRC = document.currentScript?.src || null;
+
+  /*
    * External resources
    */
-  const DEFUDDLE_URL = "https://mydefuddle.netlify.app/index.js";
-  const SCRIPT_URL = "https://raw.githubusercontent.com/tent4kel/Inkpaper/refs/heads/main/Inkpaper.JS";
+  const DEFUDDLE_URL = "https://mydefuddle.netlify.app/defuddle.js";
+  const SCRIPT_URL = "https://inkpap.netlify.app/inkpaper.js";
   const STORAGE_KEY = "paginateReaderStyleV12";
   const NEWSREADER_CSS =
     "https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400..700&display=swap";
@@ -176,6 +182,23 @@
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
     } catch {}
+  };
+
+  /*
+   * Settings passed in via the exported bookmarklet's script URL
+   * (?settings=...), so a config can travel to a fresh browser/page
+   * where localStorage has nothing saved yet.
+   */
+  const loadUrlSettings = () => {
+    try {
+      if (!CURRENT_SCRIPT_SRC) return null;
+      const raw = new URL(CURRENT_SCRIPT_SRC).searchParams.get("settings");
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : null;
+    } catch {
+      return null;
+    }
   };
 
   /*
@@ -864,7 +887,9 @@ html, body {
     /*
      * 14. Initialize settings
      */
-    const saved = mergeSettings(DEFAULTS, loadSavedSettings());
+    const urlSettings = loadUrlSettings();
+    const saved = mergeSettings(DEFAULTS, urlSettings || loadSavedSettings());
+    if (urlSettings) saveSettings(saved);
     frameModeSelect.value = String(saved.frameMode);
     colWidthInput.value = String(saved.columnWidth);
     fontSizeInput.value = String(saved.fontSize);
