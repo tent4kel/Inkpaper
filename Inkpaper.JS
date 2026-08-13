@@ -8,7 +8,7 @@
   /*
    * External resources
    */
-  const DEFUDDLE_URL = "https://mydefuddle.netlify.app/defuddle.js";
+  const DEFUDDLE_URL = "https://mydefuddle.netlify.app/index.js";
   const SCRIPT_URL = "https://inkpap.netlify.app/inkpaper.js";
   const STORAGE_KEY = "paginateReaderStyleV12";
   const NEWSREADER_CSS =
