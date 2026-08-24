@@ -9,7 +9,7 @@
    * External resources
    */
   const DEFUDDLE_URL = "https://mydefuddle.netlify.app/index.js";
-  const SCRIPT_URL = "https://inkpap.netlify.app/inkpaper.js";
+  const SCRIPT_URL = "https://cdn.jsdelivr.net/gh/tent4kel/Inkpaper@main/Inkpaper.JS";
   const STORAGE_KEY = "paginateReaderStyleV12";
   const NEWSREADER_CSS =
     "https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400..700&display=swap";

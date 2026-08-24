@@ -1,1 +1,1 @@
-javascript:(()=>{var s=document.createElement("script");s.src="https://inkpap.netlify.app/inkpaper.js";document.head.appendChild(s)})()
+javascript:(()=>{var s=document.createElement("script");s.src="https://cdn.jsdelivr.net/gh/tent4kel/Inkpaper@main/Inkpaper.JS";document.head.appendChild(s)})()
